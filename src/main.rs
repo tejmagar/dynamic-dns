@@ -1,33 +1,54 @@
 use simple_dns::Packet;
+use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::UdpSocket;
+use tokio::sync::Mutex;
 
 #[tokio::main]
 async fn main() {
     // Bind server socket to listen for DNS queries
-    let server_socket = UdpSocket::bind("157.245.97.9:53").await.unwrap();
+    let server_socket = Arc::new(Mutex::new(
+        UdpSocket::bind("157.245.97.9:53").await.unwrap(),
+    ));
 
     // Bind target socket to communicate with Google DNS
-    let target = UdpSocket::bind("0.0.0.0:0").await.unwrap();
+    let target = Arc::new(UdpSocket::bind("0.0.0.0:0").await.unwrap());
     target.connect("8.8.8.8:53").await.unwrap();
 
     loop {
         println!("Listening");
         let mut buf = [0; 1024];
-        let (read_size, addr) = match server_socket.recv_from(&mut buf).await {
-            Ok(result) => result,
-            Err(e) => {
-                eprintln!("Error receiving query: {}", e);
-                return;
-            }
-        };
+
+        let server_socket_clone = server_socket.clone();
+        let target = target.clone();
+
+        let result: Option<(usize, SocketAddr)> = async {
+            let server_socket = server_socket_clone.lock().await;
+            return match server_socket.recv_from(&mut buf).await {
+                Ok(result) => Some(result),
+                Err(e) => {
+                    eprintln!("Error receiving query: {}", e);
+                    return None;
+                }
+            };
+        }.await;
+
+        let (read_size, addr);
+        if let Some(result) = result {
+            read_size = result.0;
+            addr = result.1;
+        } else {
+            return;
+        }
+
         println!("Received query from client: {}", addr);
 
         let received = &mut buf[..read_size];
 
         // Parse the received DNS packet
         let packet = match Packet::parse(&received) {
-            Ok(packet) => packet,
+            Ok(packet) => Arc::new(packet),
             Err(e) => {
                 eprintln!("Error parsing packet: {}", e);
                 return;
@@ -36,6 +57,9 @@ async fn main() {
         println!("{:?}", packet.questions);
         println!("Packet ID: {}", packet.id());
 
+        let received = received.to_owned();
+
+        let target = target.clone();
         let _ = tokio::time::timeout(Duration::from_secs(5), async move {
             // Sending the query to Google DNS
             println!("Asking question to Google DNS");
@@ -75,13 +99,16 @@ async fn main() {
                 return;
             }
 
-            // Send the response to the client
-            if let Err(e) = server_socket.send_to(&mut response_buf, &addr).await {
-                eprintln!("Error sending response to client: {}", e);
-                return;
-            }
+            let server_socket_clone = server_socket_clone.clone();
+            let _ = async {
+                let server_socket = server_socket_clone.lock().await;
+                // Send the response to the client
+                if let Err(e) = server_socket.send_to(&mut response_buf, &addr).await {
+                    eprintln!("Error sending response to client: {}", e);
+                }
 
-            println!("Sending response to client: {}", addr);
+                println!("Sending response to client: {}", addr);
+            }.await;
         })
         .await;
     }
