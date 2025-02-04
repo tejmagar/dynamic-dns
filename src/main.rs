@@ -12,30 +12,31 @@ async fn main() {
     target.connect("8.8.8.8:53").await.unwrap();
 
     loop {
-        tokio::time::timeout(Duration::from_secs(5), async {
-            let mut buf = [0; 1024];
-            let (read_size, addr) = match server_socket.recv_from(&mut buf).await {
-                Ok(result) => result,
-                Err(e) => {
-                    eprintln!("Error receiving query: {}", e);
-                    return;
-                }
-            };
-            println!("Received query from client: {}", addr);
+        println!("Listening");
+        let mut buf = [0; 1024];
+        let (read_size, addr) = match server_socket.recv_from(&mut buf).await {
+            Ok(result) => result,
+            Err(e) => {
+                eprintln!("Error receiving query: {}", e);
+                return;
+            }
+        };
+        println!("Received query from client: {}", addr);
 
-            let received = &mut buf[..read_size];
+        let received = &mut buf[..read_size];
 
-            // Parse the received DNS packet
-            let packet = match Packet::parse(&received) {
-                Ok(packet) => packet,
-                Err(e) => {
-                    eprintln!("Error parsing packet: {}", e);
-                    return;
-                }
-            };
-            println!("{:?}", packet.questions);
-            println!("Packet ID: {}", packet.id());
+        // Parse the received DNS packet
+        let packet = match Packet::parse(&received) {
+            Ok(packet) => packet,
+            Err(e) => {
+                eprintln!("Error parsing packet: {}", e);
+                return;
+            }
+        };
+        println!("{:?}", packet.questions);
+        println!("Packet ID: {}", packet.id());
 
+        let _ = tokio::time::timeout(Duration::from_secs(5), async move {
             // Sending the query to Google DNS
             println!("Asking question to Google DNS");
             if let Err(e) = target.send(&received).await {
@@ -44,7 +45,7 @@ async fn main() {
             }
 
             // Receive the response from Google DNS
-            let mut buf = [0; 1204];
+            let mut buf = [0; 1024];
             let read_size = match target.recv(&mut buf).await {
                 Ok(size) => size,
                 Err(e) => {
@@ -60,7 +61,7 @@ async fn main() {
                 Ok(parsed_packet) => parsed_packet,
                 Err(e) => {
                     eprintln!("Error parsing response from Google DNS: {}", e);
-                    return;;
+                    return;
                 }
             };
 
@@ -82,7 +83,6 @@ async fn main() {
 
             println!("Sending response to client: {}", addr);
         })
-        .await
-        .unwrap();
+        .await;
     }
 }
