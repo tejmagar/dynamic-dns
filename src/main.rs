@@ -18,7 +18,7 @@ async fn main() {
                 Ok(result) => result,
                 Err(e) => {
                     eprintln!("Error receiving query: {}", e);
-                    continue;
+                    return;
                 }
             };
             println!("Received query from client: {}", addr);
@@ -30,7 +30,7 @@ async fn main() {
                 Ok(packet) => packet,
                 Err(e) => {
                     eprintln!("Error parsing packet: {}", e);
-                    continue;
+                    return;
                 }
             };
             println!("{:?}", packet.questions);
@@ -40,7 +40,7 @@ async fn main() {
             println!("Asking question to Google DNS");
             if let Err(e) = target.send(&received).await {
                 eprintln!("Error sending query to Google DNS: {}", e);
-                continue;
+                return;
             }
 
             // Receive the response from Google DNS
@@ -49,7 +49,7 @@ async fn main() {
                 Ok(size) => size,
                 Err(e) => {
                     eprintln!("Error receiving response from Google DNS: {}", e);
-                    continue;
+                    return;
                 }
             };
             println!("Received answer from Google DNS");
@@ -60,7 +60,7 @@ async fn main() {
                 Ok(parsed_packet) => parsed_packet,
                 Err(e) => {
                     eprintln!("Error parsing response from Google DNS: {}", e);
-                    continue;
+                    return;;
                 }
             };
 
@@ -71,13 +71,13 @@ async fn main() {
             let mut response_buf = Vec::new();
             if let Err(e) = response_packet.write_to(&mut response_buf) {
                 eprintln!("Error serializing response: {}", e);
-                continue;
+                return;
             }
 
             // Send the response to the client
             if let Err(e) = server_socket.send_to(&mut response_buf, &addr).await {
                 eprintln!("Error sending response to client: {}", e);
-                continue;
+                return;
             }
 
             println!("Sending response to client: {}", addr);
